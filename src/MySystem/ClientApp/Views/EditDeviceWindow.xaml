@@ -1,0 +1,26 @@
+﻿<Window x:Class="ClientApp.Views.EditDeviceWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Зміна параметра пристрою" Height="240" Width="360"
+        WindowStartupLocation="CenterOwner" Background="#F8FAFC" ResizeMode="NoResize">
+
+    <!-- Головна контейнерна панель вікна редагування -->
+    <StackPanel Margin="20" VerticalAlignment="Center">
+        <!-- Заголовок з назвою та типом пристрою -->
+        <TextBlock x:Name="TxtDeviceTitle" Text="Пристрій: " FontSize="14" FontWeight="Bold" Margin="0,0,0,10" Foreground="#0F172A"/>
+
+        <!-- Динамічна підказка для введення значення -->
+        <TextBlock x:Name="TxtValuePrompt" Text="Введіть нове значення:" Style="{StaticResource MyLabelStyle}" Margin="0,0,0,5"/>
+
+        <!-- Поле введення значення параметра -->
+        <TextBox x:Name="TxtNewValue" Style="{StaticResource MyInputStyle}" Height="30" Margin="0,0,0,20"/>
+
+        <!-- Панель дій (Зберегти / Скасувати) -->
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <!-- IsDefault="True" дозволяє зберігати значення натисканням Enter -->
+            <Button Content="Зберегти" Click="BtnSave_Click" Style="{StaticResource MyButtonStyle}" IsDefault="True" Width="100" Margin="0,0,10,0"/>
+            <!-- IsCancel="True" дозволяє закривати вікно кнопкою Esc -->
+            <Button Content="Скасувати" Click="BtnCancel_Click" Style="{StaticResource MyButtonStyle}" IsCancel="True" Width="100"/>
+        </StackPanel>
+    </StackPanel>
+</Window>
