@@ -1,0 +1,26 @@
+﻿<Window x:Class="ClientApp.Views.RegisterWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Smart House - Реєстрація" Height="440" Width="400"
+        WindowStartupLocation="CenterScreen" Background="#F8FAFC">
+
+    <!-- Форма реєстрації нового користувача -->
+    <StackPanel Margin="30" VerticalAlignment="Center">
+        <TextBlock Text="Реєстрація користувача" FontSize="18" FontWeight="Bold" Margin="0,0,0,15" HorizontalAlignment="Center"/>
+
+        <TextBlock Text="Логін*:" Style="{StaticResource MyLabelStyle}" Margin="0,0,0,2"/>
+        <TextBox x:Name="TxtRegisterUsername" Style="{StaticResource MyInputStyle}" Height="28" Margin="0,0,0,10"/>
+
+        <TextBlock Text="E-mail*:" Style="{StaticResource MyLabelStyle}" Margin="0,0,0,2"/>
+        <TextBox x:Name="TxtRegisterEmail" Style="{StaticResource MyInputStyle}" Height="28" Margin="0,0,0,10"/>
+
+        <TextBlock Text="Пароль*:" Style="{StaticResource MyLabelStyle}" Margin="0,0,0,2"/>
+        <PasswordBox x:Name="TxtRegisterPassword" Style="{StaticResource MyInputStyle}" Height="28" Margin="0,0,0,10"/>
+
+        <TextBlock Text="Повторіть пароль*:" Style="{StaticResource MyLabelStyle}" Margin="0,0,0,2"/>
+        <PasswordBox x:Name="TxtRegisterPasswordConfirm" Style="{StaticResource MyInputStyle}" Height="28" Margin="0,0,0,20"/>
+
+        <Button Content="Зареєструватися" Click="BtnRegisterSubmit_Click" Style="{StaticResource MyButtonStyle}" IsDefault="True" Margin="0,0,0,10"/>
+        <Button Content="Назад" Click="BtnBackToLogin_Click" Style="{StaticResource MyButtonStyle}"/>
+    </StackPanel>
+</Window>
