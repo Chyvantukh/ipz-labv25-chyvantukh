@@ -8,19 +8,16 @@ using ServerApp.Database;
 namespace ServerApp.Network
 {
     /// <summary>
-    /// Клас мережевого TCP-сервера.
-    /// Відповідає за прийом вхідних сокет-з'єднань, розбір команд протоколу та формування відповідей.
+    /// Клас мережевого TCP-сервера системи Smart House.
+    /// Приймає вхідні сокет-з'єднання, маршрутизує команди протоколу та повертає відповіді клієнтам.
     /// </summary>
     public class TcpServerHandler
     {
         private readonly IPAddress _ipAddress;
         private readonly int _port;
         private readonly DatabaseManager _db;
-        private int _connectionCounter = 0; // Лічильник підключень для зручного логування
+        private int _connectionCounter = 0;
 
-        /// <summary>
-        /// Ініціалізує параметри TCP-сервера (IP-адресу, порт та посилання на менеджер БД).
-        /// </summary>
         public TcpServerHandler(string ip, int port, DatabaseManager db)
         {
             _ipAddress = IPAddress.Parse(ip);
@@ -29,8 +26,7 @@ namespace ServerApp.Network
         }
 
         /// <summary>
-        /// Запускає прослуховування порту та в асинхронному циклі приймає клієнтів.
-        /// Кожне нове підключення передається в окремий фоновий потік (Task.Run).
+        /// Запускає прослуховування TCP-порту та обробляє кожного клієнта в окремому фоновому потоці.
         /// </summary>
         public async Task StartAsync()
         {
@@ -46,11 +42,8 @@ namespace ServerApp.Network
             {
                 try
                 {
-                    // Очікуємо підключення клієнта без блокування головного потоку
                     TcpClient client = await listener.AcceptTcpClientAsync();
                     int connId = ++_connectionCounter;
-
-                    // Запускаємо обробку клієнта паралельно, щоб сервер міг одразу приймати інших
                     _ = Task.Run(() => ProcessingRequest(client, connId));
                 }
                 catch (Exception ex)
@@ -61,21 +54,18 @@ namespace ServerApp.Network
         }
 
         /// <summary>
-        /// Головна функція обробки одного клієнтського TCP-запиту.
-        /// Зчитує пакет із мережевого потоку, викликає маршрутизатор команд і відправляє відповідь.
+        /// Зчитує вхідний TCP-пакет, викликає відповідний обробник команди та надсилає відповідь клієнту.
         /// </summary>
         public void ProcessingRequest(TcpClient client, int connId)
         {
             try
             {
-                // Конструкція using автоматично закриє сокет і потік після завершення роботи
                 using (client)
                 using (NetworkStream stream = client.GetStream())
                 {
                     Console.WriteLine("\n------------------------------------------------------------");
                     Console.WriteLine($"[CONN #{connId}] З'єднання з клієнтом встановлено ({client.Client.RemoteEndPoint})");
 
-                    // Виділяємо буфер на 4 КБ і зчитуємо вхідні байти від клієнта
                     byte[] buffer = new byte[4096];
                     int bytesRead = stream.Read(buffer, 0, buffer.Length);
 
@@ -85,15 +75,12 @@ namespace ServerApp.Network
                         return;
                     }
 
-                    // Перетворюємо рівно bytesRead отриманих байтів у рядок UTF-8
                     string request = Encoding.UTF8.GetString(buffer, 0, bytesRead).Trim();
                     Console.WriteLine($"[CONN #{connId}] Вхідний TCP-пакет: {request}");
 
-                    // Обробляємо команду та отримуємо масив байтів відповіді
                     byte[] responseBytes = RouteCommand(request, connId);
                     string responsePreview = Encoding.UTF8.GetString(responseBytes);
 
-                    // Надсилаємо відповідь клієнту через той самий мережевий потік
                     stream.Write(responseBytes, 0, responseBytes.Length);
                     Console.WriteLine($"[CONN #{connId}] Надіслано відповідь: {responsePreview}");
                     Console.WriteLine($"[CONN #{connId}] З'єднання закрито.");
@@ -106,8 +93,7 @@ namespace ServerApp.Network
         }
 
         /// <summary>
-        /// Розбирає вхідний текстовий пакет за роздільником '|' і спрямовує його
-        /// у відповідний метод-обробник залежно від назви команди (parts[0]).
+        /// Визначає команду за першим токеном пакета та передає її відповідному методу.
         /// </summary>
         private byte[] RouteCommand(string request, int connId)
         {
@@ -118,20 +104,18 @@ namespace ServerApp.Network
             {
                 "LOGIN" => HandleLogin(parts, connId),
                 "REGISTER" => HandleRegister(parts, connId),
+                "LOGOUT" => HandleLogout(parts, connId),
                 "GET_DEVICES" => HandleGetDevices(connId),
                 "TOGGLE_DEVICE" => HandleToggleDevice(parts, connId),
                 "UPDATE_DEVICE" => HandleUpdateDevice(parts, connId),
                 "ADD_DEVICE" => HandleAddDevice(parts, connId),
+                "DELETE_DEVICE" => HandleDeleteDevice(parts, connId),
                 _ => $"ERROR|Невідома команда: {command}"
             };
 
             return Encoding.UTF8.GetBytes(response);
         }
 
-        /// <summary>
-        /// Обробляє команду авторизації: LOGIN|username|password.
-        /// Повертає OK|email або ERROR|причина.
-        /// </summary>
         private string HandleLogin(string[] parts, int connId)
         {
             if (parts.Length < 3)
@@ -142,9 +126,6 @@ namespace ServerApp.Network
             return success ? $"OK|{message}" : $"ERROR|{message}";
         }
 
-        /// <summary>
-        /// Обробляє команду реєстрації нового користувача: REGISTER|username|email|password.
-        /// </summary>
         private string HandleRegister(string[] parts, int connId)
         {
             if (parts.Length < 4)
@@ -155,9 +136,14 @@ namespace ServerApp.Network
             return success ? $"OK|{message}" : $"ERROR|{message}";
         }
 
-        /// <summary>
-        /// Обробляє запит GET_DEVICES — зчитує всі пристрої з БД та об'єднує їх через ';'.
-        /// </summary>
+        private string HandleLogout(string[] parts, int connId)
+        {
+            string username = parts.Length >= 2 && !string.IsNullOrWhiteSpace(parts[1]) ? parts[1] : "unknown";
+            Console.WriteLine($"[CONN #{connId}] -> БД: Деавторизація користувача '{username}'...");
+            var (success, message) = _db.LogoutUser(username);
+            return success ? $"OK|{message}" : $"ERROR|{message}";
+        }
+
         private string HandleGetDevices(int connId)
         {
             Console.WriteLine($"[CONN #{connId}] -> БД: Зчитування списку пристроїв...");
@@ -167,9 +153,6 @@ namespace ServerApp.Network
                 : "ERROR|Список пристроїв у БД порожній";
         }
 
-        /// <summary>
-        /// Обробляє команду ввімкнення/вимкнення пристрою: TOGGLE_DEVICE|deviceId|username.
-        /// </summary>
         private string HandleToggleDevice(string[] parts, int connId)
         {
             if (parts.Length < 3 || !int.TryParse(parts[1], out int deviceId))
@@ -180,9 +163,6 @@ namespace ServerApp.Network
             return success ? $"OK|{payload}" : $"ERROR|{payload}";
         }
 
-        /// <summary>
-        /// Обробляє команду зміни параметра пристрою: UPDATE_DEVICE|deviceId|newDetails|username.
-        /// </summary>
         private string HandleUpdateDevice(string[] parts, int connId)
         {
             if (parts.Length < 4 || !int.TryParse(parts[1], out int deviceId))
@@ -193,9 +173,6 @@ namespace ServerApp.Network
             return success ? $"OK|{payload}" : $"ERROR|{payload}";
         }
 
-        /// <summary>
-        /// Обробляє команду додавання нового пристрою: ADD_DEVICE|name|type|isOn|details|username.
-        /// </summary>
         private string HandleAddDevice(string[] parts, int connId)
         {
             if (parts.Length < 6)
@@ -204,6 +181,16 @@ namespace ServerApp.Network
             bool isOn = parts[3] == "1" || parts[3].Equals("true", StringComparison.OrdinalIgnoreCase);
             Console.WriteLine($"[CONN #{connId}] -> БД: Додавання пристрою '{parts[1]}' ({parts[2]})...");
             var (success, payload) = _db.AddDevice(parts[1], parts[2], isOn, parts[4], parts[5]);
+            return success ? $"OK|{payload}" : $"ERROR|{payload}";
+        }
+
+        private string HandleDeleteDevice(string[] parts, int connId)
+        {
+            if (parts.Length < 3 || !int.TryParse(parts[1], out int deviceId))
+                return "ERROR|Некоректний формат запиту DELETE_DEVICE";
+
+            Console.WriteLine($"[CONN #{connId}] -> БД: Видалення пристрою ID={deviceId}...");
+            var (success, payload) = _db.DeleteDevice(deviceId, parts[2]);
             return success ? $"OK|{payload}" : $"ERROR|{payload}";
         }
     }

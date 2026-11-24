@@ -1,34 +1,26 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Windows;
-using ClientApp.Models;
+using ClientApp.Network;
 
 namespace ClientApp.Views
 {
-    // Логіка вікна авторизації
+    /// <summary>
+    /// Логіка вікна авторизації з перевіркою облікових даних через TCP-сервер.
+    /// </summary>
     public partial class LoginWindow : Window
     {
-        // Статичний список користувачів (імітація бази даних для Лабораторної №2)
-        public static List<User> RegisteredUsers = new List<User>
-        {
-            new User("admin", "admin@smarthouse.com", "admin")
-        };
-
         public LoginWindow()
         {
             InitializeComponent();
         }
 
-        // Перевірка введених даних та перехід до головного вікна
         private void BtnLogin_Click(object sender, RoutedEventArgs e)
         {
             try
             {
-                string username = TxtUsername.Text.Trim();
-                string password = TxtPassword.Password;
+                string username = TxtUsername.Text.Trim().Replace("|", "");
+                string password = TxtPassword.Password.Replace("|", "");
 
-                // Перевірка на заповнення полів
                 if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password))
                 {
                     MessageBox.Show("Будь ласка, заповніть усі поля!", "Помилка введення",
@@ -36,31 +28,29 @@ namespace ClientApp.Views
                     return;
                 }
 
-                // Перевірка наявності користувача
-                bool userExists = RegisteredUsers.Any(u => u.Username.Equals(username, StringComparison.OrdinalIgnoreCase)
-                                                         && u.Password == password);
+                string response = TcpClientService.SendRequest($"LOGIN|{username}|{password}");
+                string[] parts = response.Split('|', 2);
 
-                if (userExists)
+                if (parts[0] == "OK")
                 {
-                    // Перехід до головного вікна без додаткових підтверджень
-                    MainWindow mainWindow = new MainWindow();
+                    MainWindow mainWindow = new MainWindow(username);
                     mainWindow.Show();
                     this.Close();
                 }
                 else
                 {
-                    MessageBox.Show("Невірний логін або пароль!", "Помилка авторизації",
+                    string errorMsg = parts.Length > 1 ? parts[1] : "Невірний логін або пароль!";
+                    MessageBox.Show(errorMsg, "Помилка авторизації",
                                     MessageBoxButton.OK, MessageBoxImage.Error);
                 }
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Виникла помилка під час авторизації: {ex.Message}", "Помилка системи",
+                MessageBox.Show($"Помилка мережі / Сервер недоступний:\n{ex.Message}", "Помилка підключення",
                                 MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
-        // Перехід до вікна реєстрації
         private void BtnOpenRegister_Click(object sender, RoutedEventArgs e)
         {
             try
