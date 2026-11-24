@@ -2,95 +2,258 @@
 using System.Collections.ObjectModel;
 using System.Windows;
 using ClientApp.Models;
+using ClientApp.Network;
 
 namespace ClientApp.Views
 {
-    // Логіка головного вікна керування пристроями
+    /// <summary>
+    /// Логіка головного вікна дистанційного керування та моніторингу пристроїв Smart House.
+    /// Усі операції синхронізуються з базою даних SQLite через TCP-сервер.
+    /// </summary>
     public partial class MainWindow : Window
     {
-        // Колекція пристроїв із підтримкою автоматичного оновлення UI (ObservableCollection)
-        public ObservableCollection<SmartDevice> Devices { get; set; }
+        public ObservableCollection<SmartDevice> Devices { get; set; } = new();
+        private readonly string _currentUsername;
 
-        public MainWindow()
+        public MainWindow() : this("admin")
+        {
+        }
+
+        public MainWindow(string username)
         {
             InitializeComponent();
+            _currentUsername = username;
+            TxtCurrentUser.Text = $"Користувач: {_currentUsername}";
+            DgDevices.ItemsSource = Devices;
 
+            LoadDevicesFromServer();
+        }
+
+        /// <summary>
+        /// Завантажує актуальний перелік пристроїв із БД через TCP-команду GET_DEVICES.
+        /// </summary>
+        private void LoadDevicesFromServer()
+        {
             try
             {
-                // Початкова ініціалізація списку пристроїв
-                Devices = new ObservableCollection<SmartDevice>
-                {
-                    new SmartDevice { Name = "Кондиціонер у вітальні", Type = "Клімат", IsOn = true, StatusDetails = "22°C" },
-                    new SmartDevice { Name = "Освітлення кухні", Type = "Освітлення", IsOn = false, StatusDetails = "Яскравість 0%" },
-                    new SmartDevice { Name = "Розумний замок", Type = "Безпека", IsOn = true, StatusDetails = "Зачинено" },
-                    new SmartDevice { Name = "Тепла підлога", Type = "Клімат", IsOn = false, StatusDetails = "20°C" }
-                };
+                string response = TcpClientService.SendRequest("GET_DEVICES");
+                string[] parts = response.Split('|', 2);
 
-                DgDevices.ItemsSource = Devices;
+                if (parts[0] == "OK" && parts.Length > 1)
+                {
+                    Devices.Clear();
+                    string[] items = parts[1].Split(';', StringSplitOptions.RemoveEmptyEntries);
+
+                    foreach (string item in items)
+                    {
+                        string[] fields = item.Split('~');
+                        if (fields.Length >= 6 && int.TryParse(fields[0], out int id))
+                        {
+                            Devices.Add(new SmartDevice
+                            {
+                                Id = id,
+                                Name = fields[1],
+                                Type = fields[2],
+                                IsOn = fields[3] == "1",
+                                StatusDetails = fields[4],
+                                LastUpdated = fields[5]
+                            });
+                        }
+                    }
+
+                    TxtStatusBar.Text = $"Статус: Синхронізовано з сервером ({DateTime.Now:HH:mm:ss}) | Пристроїв: {Devices.Count}";
+                }
+                else
+                {
+                    string err = parts.Length > 1 ? parts[1] : "Не вдалося отримати дані";
+                    TxtStatusBar.Text = $"Статус: {err}";
+                }
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Помилка завантаження пристроїв: {ex.Message}", "Помилка",
+                TxtStatusBar.Text = "Статус: Помилка мережі / Сервер недоступний";
+                MessageBox.Show($"Помилка мережі / Сервер недоступний:\n{ex.Message}", "Помилка моніторингу",
                                 MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
-        // Перемикання стану увімкнено/вимкнено
+        /// <summary>
+        /// Перемикає стан увімкнено/вимкнено вибраного пристрою через команду TOGGLE_DEVICE.
+        /// </summary>
         private void BtnToggle_Click(object sender, RoutedEventArgs e)
         {
             try
             {
-                if (DgDevices.SelectedItem is SmartDevice selectedDevice)
-                {
-                    selectedDevice.IsOn = !selectedDevice.IsOn;
-                    selectedDevice.LastUpdated = DateTime.Now.ToString("HH:mm:ss");
-                }
-                else
+                if (DgDevices.SelectedItem is not SmartDevice selectedDevice)
                 {
                     MessageBox.Show("Будь ласка, виберіть пристрій зі списку!", "Попередження",
                                     MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                string response = TcpClientService.SendRequest($"TOGGLE_DEVICE|{selectedDevice.Id}|{_currentUsername}");
+                string[] parts = response.Split('|');
+
+                if (parts[0] == "OK" && parts.Length >= 4)
+                {
+                    selectedDevice.IsOn = parts[1] == "1";
+                    selectedDevice.LastUpdated = parts[3];
+                    TxtStatusBar.Text = $"Команду виконано: '{selectedDevice.Name}' -> {selectedDevice.StatusText}";
+                }
+                else
+                {
+                    MessageBox.Show(parts.Length > 1 ? parts[1] : "Помилка виконання команди", "Помилка",
+                                    MessageBoxButton.OK, MessageBoxImage.Error);
                 }
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Помилка керування пристроєм: {ex.Message}", "Помилка",
+                TxtStatusBar.Text = "Статус: Помилка зв'язку із сервером";
+                MessageBox.Show($"Помилка керування пристроєм:\n{ex.Message}", "Помилка мережі",
                                 MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
-        // Редагування параметра (замок змінюється прямо по кнопці, для числових — відкриваємо модальне вікно)
+        /// <summary>
+        /// Оновлює робочий параметр пристрою через команду UPDATE_DEVICE.
+        /// </summary>
         private void BtnEdit_Click(object sender, RoutedEventArgs e)
         {
             try
             {
-                if (DgDevices.SelectedItem is SmartDevice selectedDevice)
+                if (DgDevices.SelectedItem is not SmartDevice selectedDevice)
                 {
-                    if (selectedDevice.Type == "Безпека")
-                    {
-                        selectedDevice.StatusDetails = selectedDevice.StatusDetails == "Зачинено" ? "Відчинено" : "Зачинено";
-                        selectedDevice.LastUpdated = DateTime.Now.ToString("HH:mm:ss");
-                    }
-                    else
-                    {
-                        EditDeviceWindow editWindow = new EditDeviceWindow(selectedDevice);
-                        editWindow.Owner = this;
-                        editWindow.ShowDialog();
-                    }
+                    MessageBox.Show("Будь ласка, виберіть пристрій зі списку!", "Попередження",
+                                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                string newDetails;
+                if (selectedDevice.Type == "Безпека")
+                {
+                    newDetails = selectedDevice.StatusDetails == "Зачинено" ? "Відчинено" : "Зачинено";
                 }
                 else
                 {
-                    MessageBox.Show("Будь ласка, виберіть пристрій зі списку!", "Попередження",
+                    EditDeviceWindow editWindow = new EditDeviceWindow(selectedDevice) { Owner = this };
+                    if (editWindow.ShowDialog() != true)
+                        return;
+
+                    newDetails = editWindow.UpdatedDetails;
+                }
+
+                string response = TcpClientService.SendRequest($"UPDATE_DEVICE|{selectedDevice.Id}|{newDetails}|{_currentUsername}");
+                string[] parts = response.Split('|');
+
+                if (parts[0] == "OK" && parts.Length >= 3)
+                {
+                    selectedDevice.StatusDetails = parts[1];
+                    selectedDevice.LastUpdated = parts[2];
+                    TxtStatusBar.Text = $"Команду виконано: '{selectedDevice.Name}' -> {selectedDevice.StatusDetails}";
+                }
+                else
+                {
+                    MessageBox.Show(parts.Length > 1 ? parts[1] : "Не вдалося оновити параметр", "Помилка",
+                                    MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                TxtStatusBar.Text = "Статус: Помилка зв'язку із сервером";
+                MessageBox.Show($"Помилка оновлення параметра:\n{ex.Message}", "Помилка мережі",
+                                MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        /// <summary>
+        /// Відкриває діалог додавання нового пристрою та зберігає його в БД через команду ADD_DEVICE.
+        /// </summary>
+        private void BtnAdd_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                AddDeviceWindow addWindow = new AddDeviceWindow { Owner = this };
+                if (addWindow.ShowDialog() != true)
+                    return;
+
+                int isOnFlag = addWindow.IsDeviceOn ? 1 : 0;
+                string packet = $"ADD_DEVICE|{addWindow.DeviceName}|{addWindow.DeviceType}|{isOnFlag}|{addWindow.InitialDetails}|{_currentUsername}";
+
+                string response = TcpClientService.SendRequest(packet);
+                string[] parts = response.Split('|');
+
+                if (parts[0] == "OK")
+                {
+                    LoadDevicesFromServer();
+                    TxtStatusBar.Text = $"Команду виконано: додано '{addWindow.DeviceName}'";
+                    MessageBox.Show(parts.Length > 2 ? parts[2] : "Пристрій успішно додано!", "Успіх",
+                                    MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                else
+                {
+                    MessageBox.Show(parts.Length > 1 ? parts[1] : "Не вдалося додати пристрій", "Помилка додавання",
                                     MessageBoxButton.OK, MessageBoxImage.Warning);
                 }
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Помилка оновлення параметра: {ex.Message}", "Помилка",
+                MessageBox.Show($"Помилка додавання пристрою:\n{ex.Message}", "Помилка мережі",
                                 MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
-        // Завершення сеансу та повернення до авторизації
+        /// <summary>
+        /// Видаляє вибраний пристрій із бази даних через команду DELETE_DEVICE.
+        /// </summary>
+        private void BtnDelete_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (DgDevices.SelectedItem is not SmartDevice selectedDevice)
+                {
+                    MessageBox.Show("Будь ласка, виберіть пристрій для видалення!", "Попередження",
+                                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                var confirm = MessageBox.Show($"Ви дійсно бажаєте видалити пристрій '{selectedDevice.Name}'?",
+                                              "Підтвердження видалення", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                if (confirm != MessageBoxResult.Yes)
+                    return;
+
+                string response = TcpClientService.SendRequest($"DELETE_DEVICE|{selectedDevice.Id}|{_currentUsername}");
+                string[] parts = response.Split('|', 2);
+
+                if (parts[0] == "OK")
+                {
+                    string removedName = selectedDevice.Name;
+                    Devices.Remove(selectedDevice);
+                    TxtStatusBar.Text = $"Команду виконано: видалено '{removedName}'";
+                }
+                else
+                {
+                    MessageBox.Show(parts.Length > 1 ? parts[1] : "Помилка видалення", "Помилка",
+                                    MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Помилка видалення пристрою:\n{ex.Message}", "Помилка мережі",
+                                MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        /// <summary>
+        /// Примусово оновлює список пристроїв із сервера.
+        /// </summary>
+        private void BtnRefresh_Click(object sender, RoutedEventArgs e)
+        {
+            LoadDevicesFromServer();
+        }
+
+        /// <summary>
+        /// Надсилає команду LOGOUT на сервер, очищає сесію та повертає у вікно входу.
+        /// </summary>
         private void BtnLogout_Click(object sender, RoutedEventArgs e)
         {
             try
@@ -100,6 +263,15 @@ namespace ClientApp.Views
 
                 if (result == MessageBoxResult.Yes)
                 {
+                    try
+                    {
+                        TcpClientService.SendRequest($"LOGOUT|{_currentUsername}");
+                    }
+                    catch
+                    {
+                        // Якщо сервер тимчасово недоступний, виконуємо локальне закриття сесії згідно з UML
+                    }
+
                     LoginWindow loginWindow = new LoginWindow();
                     loginWindow.Show();
                     this.Close();

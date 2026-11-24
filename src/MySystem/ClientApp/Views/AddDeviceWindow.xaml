@@ -1,0 +1,32 @@
+<Window x:Class="ClientApp.Views.AddDeviceWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Додавання нового пристрою" Height="370" Width="390"
+        WindowStartupLocation="CenterOwner" Background="#F8FAFC" ResizeMode="NoResize">
+
+    <StackPanel Margin="25" VerticalAlignment="Center">
+        <TextBlock Text="Новий пристрій Smart House" FontSize="16" FontWeight="Bold" Margin="0,0,0,15" Foreground="#0F172A"/>
+
+        <TextBlock Text="Назва пристрою*:" Style="{StaticResource MyLabelStyle}" Margin="0,0,0,4"/>
+        <TextBox x:Name="TxtDeviceName" Style="{StaticResource MyInputStyle}" Margin="0,0,0,10"/>
+
+        <TextBlock Text="Категорія (тип)*:" Style="{StaticResource MyLabelStyle}" Margin="0,0,0,4"/>
+        <ComboBox x:Name="CmbDeviceType" Height="30" FontSize="12" Margin="0,0,0,10" SelectedIndex="0">
+            <ComboBoxItem Content="Клімат"/>
+            <ComboBoxItem Content="Освітлення"/>
+            <ComboBoxItem Content="Безпека"/>
+            <ComboBoxItem Content="Автоматика"/>
+            <ComboBoxItem Content="Побутові прилади"/>
+        </ComboBox>
+
+        <TextBlock Text="Початковий параметр (напр. 22°C, Закрито)*:" Style="{StaticResource MyLabelStyle}" Margin="0,0,0,4"/>
+        <TextBox x:Name="TxtInitialDetails" Style="{StaticResource MyInputStyle}" Margin="0,0,0,12"/>
+
+        <CheckBox x:Name="ChkIsOn" Content="Увімкнути пристрій одразу після додавання" IsChecked="True" FontSize="12" Margin="0,0,0,18"/>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="Додати" Click="BtnAddSubmit_Click" Style="{StaticResource MyButtonStyle}" IsDefault="True" Width="105" Margin="0,0,10,0"/>
+            <Button Content="Скасувати" Click="BtnCancel_Click" Style="{StaticResource MyButtonStyle}" IsCancel="True" Width="105"/>
+        </StackPanel>
+    </StackPanel>
+</Window>

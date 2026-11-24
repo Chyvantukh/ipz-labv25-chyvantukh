@@ -12,13 +12,12 @@ namespace ServerApp.Database
     public class DatabaseManager
     {
         private readonly string _connectionString;
-        // Об'єкт синхронізації, щоб два потоки не намагалися одночасно змінювати файл SQLite
         private readonly object _dbLock = new();
 
         public string DatabaseFullPath { get; }
 
         /// <summary>
-        /// Формує рядок підключення до файлу БД та запускає перевірку/створення структури таблиць.
+        /// Ініціалізує підключення до файлу БД та перевіряє наявність таблиць.
         /// </summary>
         public DatabaseManager(string dbPath = "smarthouse.db")
         {
@@ -28,8 +27,8 @@ namespace ServerApp.Database
         }
 
         /// <summary>
-        /// Створює таблиці Users, Devices та EventLogs (якщо файл БД новий)
-        /// і заповнює їх стартовими даними (адміністратор admin та 4 базові пристрої).
+        /// Створює таблиці Users, Devices та EventLogs і заповнює БД стартовими даними
+        /// для демонстрації роботи системи Smart House (варіант 25).
         /// </summary>
         private void InitializeDatabase()
         {
@@ -67,7 +66,6 @@ namespace ServerApp.Database
                 ";
                 cmd.ExecuteNonQuery();
 
-                // Перевіряємо, чи є користувачі в таблиці; якщо порожня — додаємо admin
                 var checkUsers = connection.CreateCommand();
                 checkUsers.CommandText = "SELECT COUNT(*) FROM Users;";
                 long userCount = (long)(checkUsers.ExecuteScalar() ?? 0);
@@ -82,7 +80,6 @@ namespace ServerApp.Database
                     insertUser.ExecuteNonQuery();
                 }
 
-                // Перевіряємо, чи є пристрої в таблиці; якщо порожня — додаємо 4 стартові пристрої
                 var checkDevices = connection.CreateCommand();
                 checkDevices.CommandText = "SELECT COUNT(*) FROM Devices;";
                 long deviceCount = (long)(checkDevices.ExecuteScalar() ?? 0);
@@ -95,7 +92,9 @@ namespace ServerApp.Database
                         INSERT INTO Devices (Name, Type, IsOn, StatusDetails, LastUpdated) VALUES
                         ('Кондиціонер у вітальні', 'Клімат', 1, '22°C', @now),
                         ('Освітлення кухні', 'Освітлення', 0, 'Яскравість 0%', @now),
-                        ('Розумний замок', 'Безпека', 1, 'Зачинено', @now),
+                        ('Розумні вхідні двері', 'Безпека', 1, 'Зачинено', @now),
+                        ('Віконні жалюзі', 'Автоматика', 1, 'Відкрито на 75%', @now),
+                        ('Електрочайник', 'Побутові прилади', 0, 'Очікування (24°C)', @now),
                         ('Тепла підлога', 'Клімат', 0, '20°C', @now);
                     ";
                     insertDevices.Parameters.AddWithValue("@now", now);
@@ -105,8 +104,7 @@ namespace ServerApp.Database
         }
 
         /// <summary>
-        /// Перевіряє логін і пароль користувача в таблиці Users.
-        /// У разі успіху повертає (true, email) та записує подію входу в EventLogs.
+        /// Перевіряє облікові дані користувача та реєструє вхід у таблиці EventLogs.
         /// </summary>
         public (bool Success, string Message) ValidateUser(string username, string password)
         {
@@ -120,7 +118,6 @@ namespace ServerApp.Database
                     SELECT Email FROM Users 
                     WHERE LOWER(Username) = LOWER(@username) AND Password = @password;
                 ";
-                // Використовуємо параметри (@username, @password) для захисту від SQL-ін'єкцій
                 cmd.Parameters.AddWithValue("@username", username);
                 cmd.Parameters.AddWithValue("@password", password);
 
@@ -136,7 +133,7 @@ namespace ServerApp.Database
         }
 
         /// <summary>
-        /// Реєструє нового користувача в таблиці Users, якщо такий логін ще не зайнятий.
+        /// Реєструє нового користувача в таблиці Users за умови унікальності логіна.
         /// </summary>
         public (bool Success, string Message) RegisterUser(string username, string email, string password)
         {
@@ -145,7 +142,6 @@ namespace ServerApp.Database
                 using var connection = new SqliteConnection(_connectionString);
                 connection.Open();
 
-                // Спочатку перевіряємо унікальність логіна
                 var checkCmd = connection.CreateCommand();
                 checkCmd.CommandText = "SELECT COUNT(*) FROM Users WHERE LOWER(Username) = LOWER(@username);";
                 checkCmd.Parameters.AddWithValue("@username", username);
@@ -154,7 +150,6 @@ namespace ServerApp.Database
                 if (exists > 0)
                     return (false, "Даний логін уже зайнятий!");
 
-                // Додаємо новий обліковий запис у таблицю Users
                 var insertCmd = connection.CreateCommand();
                 insertCmd.CommandText = @"
                     INSERT INTO Users (Username, Email, Password)
@@ -171,8 +166,21 @@ namespace ServerApp.Database
         }
 
         /// <summary>
-        /// Зчитує всі записи з таблиці Devices та серіалізує кожен рядок у формат:
-        /// id~name~type~isOn~details~updated для передачі по TCP-мережі.
+        /// Фіксує вихід (деавторизацію) користувача в журналі подій EventLogs.
+        /// </summary>
+        public (bool Success, string Message) LogoutUser(string username)
+        {
+            lock (_dbLock)
+            {
+                using var connection = new SqliteConnection(_connectionString);
+                connection.Open();
+                LogEventInternal(connection, null, username, "LOGOUT", "Вихід користувача із системи");
+                return (true, "Вихід виконано");
+            }
+        }
+
+        /// <summary>
+        /// Зчитує всі пристрої з таблиці Devices і формує серіалізований список для передачі по TCP.
         /// </summary>
         public List<string> GetAllDevicesSerialized()
         {
@@ -203,8 +211,7 @@ namespace ServerApp.Database
         }
 
         /// <summary>
-        /// Інвертує стан живлення пристрою (IsOn: 0 <-> 1) за його Id,
-        /// оновлює час останньої зміни та фіксує дію в журналі EventLogs.
+        /// Перемикає стан живлення пристрою (IsOn: 0 <-> 1) у таблиці Devices.
         /// </summary>
         public (bool Success, string Payload) ToggleDevice(int deviceId, string username)
         {
@@ -213,7 +220,6 @@ namespace ServerApp.Database
                 using var connection = new SqliteConnection(_connectionString);
                 connection.Open();
 
-                // 1. Отримуємо назву та поточний стан пристрою
                 var selectCmd = connection.CreateCommand();
                 selectCmd.CommandText = "SELECT Name, IsOn FROM Devices WHERE Id = @id;";
                 selectCmd.Parameters.AddWithValue("@id", deviceId);
@@ -224,11 +230,10 @@ namespace ServerApp.Database
 
                 string name = reader.GetString(0);
                 int currentIsOn = reader.GetInt32(1);
-                reader.Close(); // Закриваємо reader перед виконанням запиту UPDATE
+                reader.Close();
 
-                // 2. Обчислюємо новий стан та оновлюємо запис у таблиці Devices
                 int newIsOn = currentIsOn == 1 ? 0 : 1;
-                string updatedTime = DateTime.Now.ToString("HH:mm:ss");
+                string updatedTime = DateTime.Now.ToString("dd:MM:yyyy HH:mm:ss");
                 string statusText = newIsOn == 1 ? "Увімкнено / Відкрито" : "Вимкнено / Закрито";
 
                 var updateCmd = connection.CreateCommand();
@@ -248,8 +253,7 @@ namespace ServerApp.Database
         }
 
         /// <summary>
-        /// Оновлює текстовий параметр пристрою (StatusDetails, наприклад температуру чи яскравість)
-        /// у таблиці Devices за його ідентифікатором.
+        /// Оновлює параметр пристрою (StatusDetails) та час зміни в таблиці Devices.
         /// </summary>
         public (bool Success, string Payload) UpdateDeviceDetails(int deviceId, string newDetails, string username)
         {
@@ -266,7 +270,7 @@ namespace ServerApp.Database
                 if (string.IsNullOrEmpty(name))
                     return (false, $"Пристрій з ID={deviceId} не знайдено!");
 
-                string updatedTime = DateTime.Now.ToString("HH:mm:ss");
+                string updatedTime = DateTime.Now.ToString("dd:MM:yyyy HH:mm:ss");
 
                 var updateCmd = connection.CreateCommand();
                 updateCmd.CommandText = @"
@@ -285,7 +289,7 @@ namespace ServerApp.Database
         }
 
         /// <summary>
-        /// Додає новий пристрій до таблиці Devices та повертає згенерований автоінкрементний Id.
+        /// Перевіряє відсутність дубліката за назвою та додає новий пристрій до таблиці Devices.
         /// </summary>
         public (bool Success, string Payload) AddDevice(string name, string type, bool isOn, string details, string username)
         {
@@ -293,6 +297,14 @@ namespace ServerApp.Database
             {
                 using var connection = new SqliteConnection(_connectionString);
                 connection.Open();
+
+                var checkCmd = connection.CreateCommand();
+                checkCmd.CommandText = "SELECT COUNT(*) FROM Devices WHERE LOWER(Name) = LOWER(@name);";
+                checkCmd.Parameters.AddWithValue("@name", name);
+
+                long exists = (long)(checkCmd.ExecuteScalar() ?? 0);
+                if (exists > 0)
+                    return (false, $"Пристрій '{name}' вже існує в системі!");
 
                 string updatedTime = DateTime.Now.ToString("dd:MM:yyyy HH:mm");
 
@@ -308,7 +320,6 @@ namespace ServerApp.Database
                 insertCmd.Parameters.AddWithValue("@details", details);
                 insertCmd.Parameters.AddWithValue("@updated", updatedTime);
 
-                // Отримуємо Id щойно вставленого рядка
                 long newId = (long)(insertCmd.ExecuteScalar() ?? 0);
                 LogEventInternal(connection, (int)newId, username, "ADD_DEVICE", $"Додано пристрій: {name} ({type})");
 
@@ -317,8 +328,35 @@ namespace ServerApp.Database
         }
 
         /// <summary>
-        /// Допоміжний метод для запису події аудиту в таблицю EventLogs
-        /// у межах уже відкритого з'єднання з базою даних.
+        /// Видаляє пристрій із таблиці Devices за його ідентифікатором та фіксує дію в EventLogs.
+        /// </summary>
+        public (bool Success, string Payload) DeleteDevice(int deviceId, string username)
+        {
+            lock (_dbLock)
+            {
+                using var connection = new SqliteConnection(_connectionString);
+                connection.Open();
+
+                var selectCmd = connection.CreateCommand();
+                selectCmd.CommandText = "SELECT Name FROM Devices WHERE Id = @id;";
+                selectCmd.Parameters.AddWithValue("@id", deviceId);
+
+                var name = selectCmd.ExecuteScalar()?.ToString();
+                if (string.IsNullOrEmpty(name))
+                    return (false, $"Пристрій з ID={deviceId} не знайдено!");
+
+                var deleteCmd = connection.CreateCommand();
+                deleteCmd.CommandText = "DELETE FROM Devices WHERE Id = @id;";
+                deleteCmd.Parameters.AddWithValue("@id", deviceId);
+                deleteCmd.ExecuteNonQuery();
+
+                LogEventInternal(connection, deviceId, username, "DELETE_DEVICE", $"Видалено пристрій: {name}");
+                return (true, $"Пристрій '{name}' успішно видалено");
+            }
+        }
+
+        /// <summary>
+        /// Записує подію аудиту в таблицю EventLogs у межах поточного з'єднання з БД.
         /// </summary>
         private static void LogEventInternal(SqliteConnection connection, int? deviceId, string username, string action, string details)
         {
