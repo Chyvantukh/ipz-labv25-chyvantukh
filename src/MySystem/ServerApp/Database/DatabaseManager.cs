@@ -86,7 +86,7 @@ namespace ServerApp.Database
 
                 if (deviceCount == 0)
                 {
-                    string now = DateTime.Now.ToString("dd:MM:yyyy HH:mm");
+                    string now = DateTime.Now.ToString("HH:mm:ss");
                     var insertDevices = connection.CreateCommand();
                     insertDevices.CommandText = @"
                         INSERT INTO Devices (Name, Type, IsOn, StatusDetails, LastUpdated) VALUES
@@ -233,7 +233,7 @@ namespace ServerApp.Database
                 reader.Close();
 
                 int newIsOn = currentIsOn == 1 ? 0 : 1;
-                string updatedTime = DateTime.Now.ToString("dd:MM:yyyy HH:mm:ss");
+                string updatedTime = DateTime.Now.ToString("HH:mm:ss");
                 string statusText = newIsOn == 1 ? "Увімкнено / Відкрито" : "Вимкнено / Закрито";
 
                 var updateCmd = connection.CreateCommand();
@@ -270,7 +270,7 @@ namespace ServerApp.Database
                 if (string.IsNullOrEmpty(name))
                     return (false, $"Пристрій з ID={deviceId} не знайдено!");
 
-                string updatedTime = DateTime.Now.ToString("dd:MM:yyyy HH:mm:ss");
+                string updatedTime = DateTime.Now.ToString("HH:mm:ss");
 
                 var updateCmd = connection.CreateCommand();
                 updateCmd.CommandText = @"
@@ -306,7 +306,7 @@ namespace ServerApp.Database
                 if (exists > 0)
                     return (false, $"Пристрій '{name}' вже існує в системі!");
 
-                string updatedTime = DateTime.Now.ToString("dd:MM:yyyy HH:mm");
+                string updatedTime = DateTime.Now.ToString("HH:mm:ss");
 
                 var insertCmd = connection.CreateCommand();
                 insertCmd.CommandText = @"
@@ -369,7 +369,7 @@ namespace ServerApp.Database
             logCmd.Parameters.AddWithValue("@username", username);
             logCmd.Parameters.AddWithValue("@action", action);
             logCmd.Parameters.AddWithValue("@details", details);
-            logCmd.Parameters.AddWithValue("@ts", DateTime.Now.ToString("dd.MM.yyyy HH:mm:ss"));
+            logCmd.Parameters.AddWithValue("@ts", DateTime.Now.ToString("HH:mm:ss"));
             logCmd.ExecuteNonQuery();
         }
     }
