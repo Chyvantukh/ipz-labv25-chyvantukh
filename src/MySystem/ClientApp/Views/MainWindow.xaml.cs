@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.ObjectModel;
 using System.Windows;
+using System.Windows.Threading;
 using ClientApp.Models;
 using ClientApp.Network;
 
@@ -14,6 +15,7 @@ namespace ClientApp.Views
     {
         public ObservableCollection<SmartDevice> Devices { get; set; } = new();
         private readonly string _currentUsername;
+        private readonly DispatcherTimer _autoRefreshTimer;
 
         public MainWindow() : this("admin")
         {
@@ -27,15 +29,37 @@ namespace ClientApp.Views
             DgDevices.ItemsSource = Devices;
 
             LoadDevicesFromServer();
+
+            // Налаштування фонового опитування сервера кожні 3 секунди для синхронізації між клієнтами
+            _autoRefreshTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromSeconds(5)
+            };
+            _autoRefreshTimer.Tick += AutoRefreshTimer_Tick;
+            _autoRefreshTimer.Start();
+        }
+
+        private void AutoRefreshTimer_Tick(object? sender, EventArgs e)
+        {
+            LoadDevicesFromServer(isSilent: true);
+        }
+
+        protected override void OnClosed(EventArgs e)
+        {
+            _autoRefreshTimer.Stop();
+            base.OnClosed(e);
         }
 
         /// <summary>
         /// Завантажує актуальний перелік пристроїв із БД через TCP-команду GET_DEVICES.
         /// </summary>
-        private void LoadDevicesFromServer()
+        private void LoadDevicesFromServer(bool isSilent = false)
         {
             try
             {
+                // Запам'ятовуємо Id виділеного пристрою, щоб не скидати вибір користувача при фоновому оновленні
+                int? selectedId = (DgDevices.SelectedItem as SmartDevice)?.Id;
+
                 string response = TcpClientService.SendRequest("GET_DEVICES");
                 string[] parts = response.Split('|', 2);
 
@@ -49,7 +73,7 @@ namespace ClientApp.Views
                         string[] fields = item.Split('~');
                         if (fields.Length >= 6 && int.TryParse(fields[0], out int id))
                         {
-                            Devices.Add(new SmartDevice
+                            var device = new SmartDevice
                             {
                                 Id = id,
                                 Name = fields[1],
@@ -57,7 +81,13 @@ namespace ClientApp.Views
                                 IsOn = fields[3] == "1",
                                 StatusDetails = fields[4],
                                 LastUpdated = fields[5]
-                            });
+                            };
+                            Devices.Add(device);
+
+                            if (selectedId.HasValue && device.Id == selectedId.Value)
+                            {
+                                DgDevices.SelectedItem = device;
+                            }
                         }
                     }
 
@@ -72,8 +102,11 @@ namespace ClientApp.Views
             catch (Exception ex)
             {
                 TxtStatusBar.Text = "Статус: Помилка мережі / Сервер недоступний";
-                MessageBox.Show($"Помилка мережі / Сервер недоступний:\n{ex.Message}", "Помилка моніторингу",
-                                MessageBoxButton.OK, MessageBoxImage.Error);
+                if (!isSilent)
+                {
+                    MessageBox.Show($"Помилка мережі / Сервер недоступний:\n{ex.Message}", "Помилка моніторингу",
+                                    MessageBoxButton.OK, MessageBoxImage.Error);
+                }
             }
         }
 
